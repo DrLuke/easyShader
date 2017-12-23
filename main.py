@@ -3,6 +3,10 @@
 import glfw
 import sys
 import tkinter
+import json
+
+import socket
+from select import select
 
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -10,8 +14,18 @@ from OpenGL.arrays import *
 from OpenGL.GL import shaders
 import OpenGL
 
+from layer import BaseLayer, RuntimeData
+from moduleManager import ModuleManager
+
 class Main:
     def __init__(self, monitor, vidmode, fullscreen):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("127.0.0.1", 31337))
+
+        self.modman = ModuleManager()
+
+        self.runtimeData = RuntimeData()
+
         self.vidmode = vidmode
         if fullscreen:
             self.glfwWindow = glfw.create_window(vidmode[0][0], vidmode[0][1], "Pyree 3.0 Trial [EXPIRES IN 29 DAYS]", None, None)
@@ -35,8 +49,47 @@ class Main:
         glfw.terminate()
 
     def loop(self):
-        glClearColor(0.2, 0.3, 0.3, 1.0)
-        glClear(GL_COLOR_BUFFER_BIT)
+        self.pollNetwork()
+        self.modman.checkNotify()
+
+        #glClearColor(0.2, 0.3, 0.3, 1.0)
+        #glClear(GL_COLOR_BUFFER_BIT)
+
+        for layer in self.modman.layersOrdered:
+            layer.render(self.runtimeData)
+
+
+    def pollNetwork(self):
+        rlist, wlist, elist = select([self.sock], [], [], 0)
+
+        while rlist:
+            data, addr = self.sock.recvfrom(50000)
+            try:
+                data = data.decode()
+                self.parseData(data)
+            except:
+                pass
+
+            rlist, wlist, elist = select([self.sock], [], [], 0)
+
+    def parseData(self, data):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            return
+
+        self.runtimeData.beat = False
+        if data["datatype"] == "beat":
+            self.runtimeData.beat = True
+            self.runtimeData.beataccum += 1
+
+        if data["datatype"] == "fft":
+            self.runtimeData.fft = data["fft"]
+
+        if data["datatype"] == "uniform":
+            pass
+
+
 
 class VidmodePicker():
     def __init__(self):
