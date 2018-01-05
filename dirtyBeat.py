@@ -5,7 +5,6 @@ import numpy as np
 import socket
 import json
 import time
-
 import math
 
 class AudioReader():
@@ -57,16 +56,17 @@ class BeatDetect():
         self.beatEnergyDb = -60
 
         # Moving Average
-        self.meanLen = 10   # In Seconds
+        self.meanLen = 3   # In Seconds
         self.meanSamples = [-20] * (self.meanLen * self.framerate)
         self.meanIndex = 0
         self.meanEnergy = 0
-        self.minimumMean = -20
+        self.minimumMean = -30
 
         # PT1 with different time constants for when the difference is positive or negative
         self.maxEnergy = 0
         self.aboveMaxT = 0.1
         self.belowMaxT = 15
+        self.maxMindistToMean = 3
 
         # Beat detection state
         self.triggerLevel = 0
@@ -80,16 +80,16 @@ class BeatDetect():
         self.index = (self.index + 1) % self.memlen
 
         self.fullmem = np.concatenate((self.fullmem[self.framesamples:], np.array(data)))
-        self.fft = np.abs(np.fft.rfft(self.fullmem)/len(self.fullmem))
+        self.fft = np.abs(np.fft.rfft(self.fullmem, norm="ortho")) / 32767
 
     def detectBeat(self):
         self.lowCutoff = 5
-        self.upperCutoff = 20
+        self.upperCutoff = 40
 
         self.lci = np.abs(self.fftfreqs - self.lowCutoff).argmin()
         self.uci = np.abs(self.fftfreqs - self.upperCutoff).argmin()
 
-        self.beatEnergy = np.sum(self.fft[self.lci:self.uci]) * ((self.uci - self.lci)/len(self.fft))
+        self.beatEnergy = np.sum(self.fft[self.lci:self.uci]) / (self.uci - self.lci)
         self.beatEnergyDb = 20*math.log10(self.beatEnergy + 1E-6)
 
         # Moving Average
@@ -107,13 +107,14 @@ class BeatDetect():
             self.maxEnergy += (self.beatEnergyDb - self.maxEnergy)/self.aboveMaxT * (1/self.framerate)
         else:
             self.maxEnergy += (self.beatEnergyDb - self.maxEnergy) / self.belowMaxT * (1/self.framerate)
+        self.maxEnergy = max(self.maxEnergy, self.meanEnergy + self.maxMindistToMean)
 
         # Beat detection algorithm
         #
         # Uses hysteresis to determine a beat. If the signal level raises above 80%
         # of the difference between the max and mean level, a beat is triggered.
         # Before a beat can be triggered again, the level has to fall below 10% first.
-        self.triggerLevel = self.meanEnergy + (self.maxEnergy - self.meanEnergy) * 1.0
+        self.triggerLevel = self.meanEnergy + (self.maxEnergy - self.meanEnergy) * 0.9
         self.resetLevel = self.meanEnergy + (self.maxEnergy - self.meanEnergy) * 0.2
         if not self.trigd:
             if self.beatEnergyDb > self.triggerLevel:
@@ -139,6 +140,7 @@ class BeatDetect():
 
     def sendFFT(self):
         reducedfft = np.interp(np.linspace(0, 10000, 512), self.fftfreqs, self.fft)
+        reducedfft = np.around(reducedfft, 3)   # 3 decimal places are enough
 
         data = {
             "datatype": "fft",

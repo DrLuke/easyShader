@@ -4,8 +4,10 @@ from glob import glob
 from inotify_simple import INotify, flags
 
 import traceback
+import sys
 
 from layer import BaseLayer
+
 
 
 class ModuleManager():
@@ -31,8 +33,6 @@ class ModuleManager():
             self.checkEvent(event)
 
     def checkEvent(self, event):
-        print("--- CHECK")
-
         name = event.name
         if "___jb_tmp___" in event.name:    # Thanks jetbrains
             name = name[:-12]
@@ -47,36 +47,28 @@ class ModuleManager():
             return
 
         if event.mask & (flags.MODIFY):
-            print("---- MODIFY")
-            print(name)
-            print(event)
             try:
                 self.replaceLayer(name)
             except Exception as exc:
-                print(traceback.format_exc())
-                print(exc)
+                print(traceback.format_exc(), file=sys.stderr)
+                print(exc, file=sys.stderr)
 
         if event.mask & flags.DELETE:
             try:
                 self.deleteLayer(name)
             except Exception as exc:
-                print(traceback.format_exc())
-                print(exc)
+                print(traceback.format_exc(), file=sys.stderr)
+                print(exc, file=sys.stderr)
 
         self.reorderLayers()
 
     def replaceLayer(self, name):
         if name in self.layers:
-
             cl = type(self.layers[name])
-            print(cl)
-            print(id(cl))
             mod = cl.__shadermod__
             importlib.reload(mod)
             cl = mod.Layer
             cl.__shadermod__ = mod
-            print(cl)
-            print(id(cl))
         else:
             cl = self.getLayerClass(name)
 
@@ -84,9 +76,12 @@ class ModuleManager():
 
         if name in self.layers:
             prevData = self.layers[name].getData()
-            newObj.setData(prevData)
+            if prevData is not None:
+                newObj.setData(prevData)
 
         self.layers[name] = newObj
+
+        print("\033[92m*** SUCCESSFULLY RELOADED:\033[0m " + name)
 
     def createLayer(self, name):
         if name in self.layers:
@@ -95,8 +90,8 @@ class ModuleManager():
             cl = self.getLayerClass(name)
             self.layers[name] = cl()
         except Exception as exc:
-            print(traceback.format_exc())
-            print(exc)
+            print(traceback.format_exc(), file=sys.stderr)
+            print(exc, file=sys.stderr)
             self.layers[name] = BaseLayer()
 
     def deleteLayer(self, name):
